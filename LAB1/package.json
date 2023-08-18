@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "csv-parser": "^3.0.0",
+    "inquirer": "^7.3.3",
+    "inquirer-file-tree-selection-prompt": "^2.0.5"
+  }
+}
