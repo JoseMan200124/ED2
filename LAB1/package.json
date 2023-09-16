@@ -1,7 +1,17 @@
 {
   "dependencies": {
     "csv-parser": "^3.0.0",
-    "inquirer": "^7.3.3",
+    "inquirer": "^9.2.10",
     "inquirer-file-tree-selection-prompt": "^2.0.5"
-  }
+  },
+  "name": "lab1",
+  "version": "1.0.0",
+  "main": "lab1.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": ""
 }
