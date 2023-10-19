@@ -1,12 +1,17 @@
 const fs = require('fs');
 const csv = require('csv-parser');
 const readline = require('readline');
+const zlib = require('zlib');
+const crypto = require('crypto');
 const Huffman = require('./algoritmos/huffman');
 const CompresionAritmetica = require('./algoritmos/compresion_aritmetica');
 const path = require('path');
+const ENCRYPTION_KEY2 = crypto.randomBytes(32).toString('hex');
+const ENCRYPTION_KEY = crypto.randomBytes(32).toString('hex');
+const IV_LENGTH = 16;
 
 class Person {
-    constructor(name, dpi, dateBirth, address, companies = {}) {
+    constructor(name, dpi, dateBirth, address, companies = {}, recruiter = '') {
         this.name = name;
         this.dpi = dpi;
         this.dateBirth = dateBirth;
@@ -15,16 +20,75 @@ class Person {
         this.key = `${name.toLowerCase()}-${dpi}`;
         this.recommendations = [];
         this.recommendationsDecoded = [];
+        this.conversations = [];
+        this.recruiter = recruiter;
 
+    }
+    encryptConversation(conversation) {
+        let iv = crypto.randomBytes(IV_LENGTH);
+        let cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY, 'hex'), iv);
+        let encrypted = cipher.update(conversation);
+        encrypted = Buffer.concat([encrypted, cipher.final()]);
+        return iv.toString('hex') + ':' + encrypted.toString('hex');
+    }
 
+    generateKeyPair() {
+        const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
+            modulusLength: 2048,
+            publicKeyEncoding: {
+                type: 'spki',
+                format: 'pem'
+            },
+            privateKeyEncoding: {
+                type: 'pkcs8',
+                format: 'pem'
+            }
+        });
+        this.privateKey = privateKey;
+        this.publicKey = publicKey;
+    }
+    encryptWithPublicKey(data, publicKey) {
+        const encryptedData = crypto.publicEncrypt(
+            { key: publicKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING },
+            Buffer.from(data)
+        );
+        return encryptedData.toString('base64');
+    }
+
+    decryptWithPrivateKey(encryptedData) {
+        const decryptedData = crypto.privateDecrypt(
+            { key: this.privateKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING },
+            Buffer.from(encryptedData, 'base64')
+        );
+        return decryptedData.toString();
+    }
+    decryptConversation(encryptedData) {
+        let parts = encryptedData.split(':');
+        let iv = Buffer.from(parts.shift(), 'hex');
+        let encryptedText = Buffer.from(parts.join(':'), 'hex');
+        let decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY2, 'hex'), iv);
+        console.log(decipher);
+        let decrypted = decipher.update(encryptedText);
+        console.log(decrypted);
+        decrypted = Buffer.concat([decrypted, decipher.final()]);
+        console.log(decrypted);
+        return decrypted.toString();
+    }
+
+    compress(data) {
+        return zlib.deflateSync(data).toString('base64');
+    }
+
+    decompress(compressedData) {
+        return zlib.inflateSync(Buffer.from(compressedData, 'base64')).toString();
     }
 }
 
 class Database {
     constructor() {
         this.data = [];
-        this.dpiHuffman = new Huffman(); // Instancia para DPI
-        this.recommendationHuffman = new Huffman(); // Instancia para cartas de recomendación
+        this.dpiHuffman = new Huffman();
+        this.recommendationHuffman = new Huffman();
         this.companyHuffmans = {};
     }
     testHuffman() {
@@ -113,24 +177,45 @@ class Database {
             console.log(`No se encontraron cartas de recomendación para el DPI ${dpi}.`);
         }
     }
+    displayConversations(dpi) {
+        const person = this.search(dpi);
+        if (person && person.conversations.length > 0) {
+            console.log(`Conversaciones para ${person.name}:`);
+            person.conversations.forEach((encryptedConv, index) => {
+                console.log(`Conversación #${index + 1}:`);
+                console.log(person.decryptConversation(encryptedConv));
+            });
+        } else {
+            console.log(`No se encontraron conversaciones para el DPI ${dpi}.`);
+        }
+    }
     loadRecommendations(person) {
         let i = 1;
         while (true) {
             const filePath = path.join(__dirname, `inputs/cartas/REC-${person.dpi}-${i}.txt`);
-
             if (fs.existsSync(filePath)) {
 
-                    const content = fs.readFileSync(filePath, 'utf8');
-                    const normalizedContent = content.replace(/\r\n/g, '\n');
-                    const encoded = this.recommendationHuffman.encode(normalizedContent);
-if(i === 1 && person.dpi === '1041443605068'){
-    console.log(encoded);
-
-}
+                const content = fs.readFileSync(filePath, 'utf8');
+                const normalizedContent = content.replace(/\r\n/g, '\n');
+                const encoded = this.recommendationHuffman.encode(normalizedContent);
                 const decoded = this.recommendationHuffman.decode(encoded);
-                    person.recommendations.push(encoded);
-                    person.recommendationsDecoded.push(decoded);
-                    i++;
+                person.recommendations.push(encoded);
+                person.recommendationsDecoded.push(decoded);
+                i++;
+            } else {
+                break;
+            }
+        }
+    }
+    loadConversations(person) {
+        let i = 1;
+        while (true) {
+            const filePath = path.join(__dirname, `inputs/conversaciones/CONV-${person.dpi}-${i}.txt`);
+            if (fs.existsSync(filePath)) {
+                const content = fs.readFileSync(filePath, 'utf8');
+                const encryptedContent = person.encryptConversation(content);
+                person.conversations.push(encryptedContent);
+                i++;
             } else {
                 break;
             }
@@ -170,7 +255,7 @@ const processCsvFile = (filePath, db, callback) => {
             }
 
             const data = JSON.parse(row.data);
-            const person = new Person(data.name, data.dpi, data.datebirth, data.address, data.companies);
+            const person = new Person(data.name, data.dpi, data.datebirth, data.address, data.companies, data.recruiter);
 
             switch (row.operation) {
                 case 'INSERT':
@@ -204,12 +289,17 @@ const rl = readline.createInterface({
     output: process.stdout
 });
 
+
 function showMenu() {
     console.log('\n===== Menú =====');
     console.log('1. Buscar por nombre');
     console.log('2. Seleccionar empresa y función');
     console.log('3. Mostrar cartas de recomendación por DPI');
-    console.log('4. Salir');
+    console.log('4. Mostrar conversaciones cifradas por DPI');
+    console.log('5. Mostrar conversaciones descifradas por DPI');
+    console.log('6. Seleccionar reclutador y compañía y validar identidad');
+    console.log('7. Salir');
+
     rl.question('Elija una opción: ', (option) => {
         switch (option) {
             case '1':
@@ -228,6 +318,35 @@ function showMenu() {
                 });
                 break;
             case '4':
+                rl.question('\nIngrese el DPI para buscar conversaciones cifradas: ', (dpi) => {
+                    const person = db.search(dpi);
+                    if (person && person.conversations.length > 0) {
+                        console.log(`Conversaciones cifradas para ${person.name}:`);
+                        person.conversations.forEach((encryptedConv, index) => {
+                            console.log(`Conversación cifrada #${index + 1}:`);
+                            console.log(encryptedConv);
+                        });
+                    } else {
+                        console.log(`No se encontraron conversaciones cifradas para el DPI ${dpi}.`);
+                    }
+                    showMenu();
+                });
+                break;
+            case '5':
+                rl.question('\nIngrese el DPI para buscar conversaciones descifradas: ', (dpi) => {
+                    db.displayConversations(dpi);
+                    showMenu();
+                });
+                break;
+            case '6':
+                rl.question('Ingrese el reclutador: ', (reclutador) => {
+                    rl.question('Ingrese la compañía: ', (compania) => {
+                        validateIdentity(reclutador, compania, db);
+                        showMenu();
+                    });
+                });
+                break;
+            case '7':
                 rl.close();
                 break;
             default:
@@ -235,6 +354,25 @@ function showMenu() {
                 break;
         }
     });
+}
+
+function validateIdentity(reclutador, compania, db) {
+    const message = 'palabra clave'; // Esto puede ser cualquier palabra clave que desees usar
+    let isValid = false;
+    db.data.forEach(person => {
+        if (person.recruiter === reclutador && Object.keys(person.companies).includes(compania)) {
+            const encryptedMessage = person.encryptWithPublicKey(message, person.publicKey);
+            const decryptedMessage = person.decryptWithPrivateKey(encryptedMessage);
+            if (decryptedMessage === message) {
+                isValid = true;
+            }
+        }
+    });
+    if (isValid) {
+        console.log('Identidad validada exitosamente.');
+    } else {
+        console.log('Identidad no pudo ser validada.');
+    }
 }
 function searchByEncodedDPI(){
     rl.question('\nIngrese el DPI codificado a buscar: ', (encodedDPI) =>{
@@ -245,6 +383,7 @@ function searchByEncodedDPI(){
             console.log(`Nombre: ${person.name}, DPI: ${person.dpi}, Fecha de nacimiento: ${person.dateBirth}, Dirección: ${person.address}`);
         }else{
             console.log(`No se encontraron resultados para ${encodedDPI}.`);
+
         }
     })
 }
@@ -254,13 +393,11 @@ function selectCompanyAndFunction() {
             const ft = functionType.toLowerCase();
 
             if (ft === 'codificación') {
-                // Lógica adicional basada en la empresa
                 rl.question('Ingrese el DPI a codificar: ', (dpi) => {
                     const encodedDPI = db.encodeDPI(dpi);
                     showMenu();
                 });
             } else if (ft === 'decodificación') {
-                // Lógica adicional basada en la empresa
                 rl.question('Ingrese el DPI codificado a decodificar: ', (encodedDPI) => {
                     const decodedDPI = db.decodeDPI(encodedDPI);
                     showMenu();
@@ -287,15 +424,12 @@ function searchByName() {
     });
 }
 
-
-
-
-
 const db = new Database();
 
-processCsvFile('LAB1\\input_cartas.csv', db, () => {
+processCsvFile('LAB1\\input_lab4.csv', db, () => {
     db.data.forEach(person => {
         db.loadRecommendations(person);
+        db.loadConversations(person);
     });
     showMenu();
 });

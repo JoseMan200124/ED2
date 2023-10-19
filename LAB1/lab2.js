@@ -207,7 +207,7 @@ function searchByName() {
 
 const db = new Database();
 
-processCsvFile('input.csv', db, () => {
+processCsvFile('input_lab4.csv', db, () => {
     generateJSONL(db);
     showMenu();
 });

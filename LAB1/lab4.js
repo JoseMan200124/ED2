@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const Huffman = require('./algoritmos/huffman');
 const CompresionAritmetica = require('./algoritmos/compresion_aritmetica');
 const path = require('path');
+const ENCRYPTION_KEY2 = crypto.randomBytes(32).toString('hex');
 const ENCRYPTION_KEY = crypto.randomBytes(32).toString('hex');
 const IV_LENGTH = 16;
 
@@ -29,13 +30,17 @@ class Person {
         return iv.toString('hex') + ':' + encrypted.toString('hex');
     }
 
-    decryptConversation(encryptedData) {
+
+        decryptConversation(encryptedData) {
         let parts = encryptedData.split(':');
         let iv = Buffer.from(parts.shift(), 'hex');
         let encryptedText = Buffer.from(parts.join(':'), 'hex');
-        let decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY, 'hex'), iv);
+        let decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY2, 'hex'), iv);
+        console.log(decipher);
         let decrypted = decipher.update(encryptedText);
+        console.log(decrypted);
         decrypted = Buffer.concat([decrypted, decipher.final()]);
+        console.log(decrypted);
         return decrypted.toString();
     }
 
@@ -51,8 +56,8 @@ class Person {
 class Database {
     constructor() {
         this.data = [];
-        this.dpiHuffman = new Huffman(); // Instancia para DPI
-        this.recommendationHuffman = new Huffman(); // Instancia para cartas de recomendación
+        this.dpiHuffman = new Huffman();
+        this.recommendationHuffman = new Huffman();
         this.companyHuffmans = {};
     }
     testHuffman() {
@@ -327,13 +332,11 @@ function selectCompanyAndFunction() {
             const ft = functionType.toLowerCase();
 
             if (ft === 'codificación') {
-                // Lógica adicional basada en la empresa
                 rl.question('Ingrese el DPI a codificar: ', (dpi) => {
                     const encodedDPI = db.encodeDPI(dpi);
                     showMenu();
                 });
             } else if (ft === 'decodificación') {
-                // Lógica adicional basada en la empresa
                 rl.question('Ingrese el DPI codificado a decodificar: ', (encodedDPI) => {
                     const decodedDPI = db.decodeDPI(encodedDPI);
                     showMenu();
@@ -362,7 +365,7 @@ function searchByName() {
 
 const db = new Database();
 
-processCsvFile('LAB1\\input.csv', db, () => {
+processCsvFile('LAB1\\input_lab4.csv', db, () => {
     db.data.forEach(person => {
         db.loadRecommendations(person);
         db.loadConversations(person);
